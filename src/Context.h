@@ -48,10 +48,17 @@ struct KernelHandle {
     cl::Program program;
     std::string code;
 
+    bool usesSharedMamory = false;
+
     bool built = false;
     bool dirty = true;
 
     int argCount = 0;
+
+    const std::string GetArgumentName(const std::string &name) const;
+
+    void ToggleSharedMemory(const bool val) { usesSharedMamory = val; }
+    const bool UsesSharedMemory() const { return usesSharedMamory; }
 
     /**
      * @brief Add argument to kernel and create buffer
@@ -176,11 +183,9 @@ struct KernelHandle {
      * with AddArgument function
      * @return int
      */
+    template <typename T> int ReadBufferData(T *data, const std::string &name);
     template <typename T>
-    int ReadBufferData(T *data, const std::string &name);
-    template <typename T>
-    int ReadBufferData(T *data, const std::string &name,
-                       const size_t &size);
+    int ReadBufferData(T *data, const std::string &name, const size_t &size);
 
     /**
      * @brief Set the data of buffer with name
@@ -191,11 +196,9 @@ struct KernelHandle {
      * with AddArgument function
      * @return int
      */
+    template <typename T> int SetBufferData(T *data, const std::string &name);
     template <typename T>
-    int SetBufferData(T *data, const std::string &name);
-    template <typename T>
-    int SetBufferData(T *data, const std::string &name,
-                      const size_t &size);
+    int SetBufferData(T *data, const std::string &name, const size_t &size);
 };
 
 /**
@@ -223,6 +226,23 @@ class Context {
      * @return false
      */
     bool IsValid() const { return initialized; }
+
+    /**
+     * @brief Enable or disable shared memory pools. Should be set before
+     * creating kernels
+     *
+     * @param val Value to set
+     */
+    // void ToggleSharedMemory(const bool &val) { _shared_memory = val; }
+
+    /**
+     * @brief Return whether this context has enabled shared memory between
+     * kernels
+     *
+     * @return true
+     * @return false
+     */
+    // const bool UsesSharedMamory() const { return _shared_memory; }
 
     /**
      * @brief Add a .cl or .ocl file for executing
@@ -274,11 +294,40 @@ class Context {
         return _kernels.find(name) != _kernels.end();
     }
 
+    /**
+     * @brief Add a buffer to be stored on the Context. The buffer
+     * will then be available for all clients to access. If the Context has
+     * enabled shared memory the buffer will be stored with the hashed name
+     * argument, while if the context does not enable shared memory, the hash
+     * will be constructed using the key + name
+     *
+     * @param name the name of the buffer object to create
+     * @param buffer SharedBuffer object pointing to a cl::Buffer
+     * @param size the size of the buffer
+     * @param key key to use for unshared memory access
+     */
+
     void AddBuffer(const std::string &name, SharedBuffer buffer,
                    const size_t &size);
+
+    /**
+     * @brief Get the buffer object stored on the context at name, or at
+     * name+key if shared memory is enabled
+     *
+     * @param name The name of the buffer object
+     * @param key key to use for unshared memory access
+     * @return SharedBuffer
+     */
     SharedBuffer GetBuffer(const std::string &name);
+
+    /**
+     * @brief Get the memory size of a buffer bject
+     *
+     * @param name name of buffer
+     * @param key key to use for unshared memory access
+     * @return const size_t
+     */
     const size_t GetBufferSize(const std::string &name);
-    // const int GetBufferIndex(const std::string &name);
 
     /**
      * @brief Execute a kernel with name kernelName
@@ -287,8 +336,15 @@ class Context {
      * @param kernelName Name of kernel to execute
      * @return int
      */
-    int Execute(const size_t &global, const std::string &kernelName);
-    int Execute(const size_t &global, KernelHandle *kernelHandle);
+    int Execute(const std::string &kernelName, const cl::NDRange &global,
+                const cl::NDRange &local = cl::NullRange);
+    int Execute(KernelHandle *kernelHandle, const cl::NDRange &global,
+                const cl::NDRange &local = cl::NullRange);
+
+    int ExecuteGraph(const std::string &kernelName, std::vector<int> sizes,
+                     const std::string &wg_argument = "");
+    int ExecuteGraph(KernelHandle *kernelHandle, std::vector<int> sizes,
+                     const std::string &wg_argument = "");
 
     /**
      * @brief Flush and finish the queue
@@ -297,7 +353,6 @@ class Context {
     void Finish();
 
   protected:
-    // Is true once everything is initialized
     std::map<std::string, bool> built;
     bool initialized = false;
 
@@ -310,7 +365,7 @@ class Context {
 
     cl::string _LoadShader(const std::string_view &fileName, int *err);
 
-    // cl::vector<cl::string> _kernelCodes;
+    // bool _shared_memory = true;
 
     cl::Context _context;
     cl::CommandQueue _queue;
@@ -322,24 +377,36 @@ class Context {
     int _buffer_count;
 };
 
+inline const std::string
+KernelHandle::GetArgumentName(const std::string &name) const {
+    // const bool use_shared = Context::GetInstance()->UsesSharedMamory();
+    if (!UsesSharedMemory()) {
+        return name + key;
+    }
+    return name;
+}
+
 template <typename T>
 inline int KernelHandle::AddArgument(cl_mem_flags flags,
                                      const std::string &name,
                                      const size_t &size, T *data) {
     dirty = true;
 
-    if (auto buff = Context::GetInstance()->GetBuffer(name); buff == nullptr) {
+    std::string argName = GetArgumentName(name);
+
+    if (auto buff = Context::GetInstance()->GetBuffer(argName);
+        buff == nullptr) {
         SharedBuffer d_data =
             std::make_shared<cl::Buffer>(*context, flags, size);
-        Context::GetInstance()->AddBuffer(name, d_data, size);
+        Context::GetInstance()->AddBuffer(argName, d_data, size);
     }
     if (data != nullptr) {
-        SetBufferData(data, Context::GetInstance()->GetBuffer(name), size);
+        SetBufferData(data, Context::GetInstance()->GetBuffer(argName), size);
     }
 
     SetArgument<cl_mem, cl::Buffer>(
-        argCount, Context::GetInstance()->GetBuffer(name).get());
-    arguments.insert({name, argCount});
+        argCount, Context::GetInstance()->GetBuffer(argName).get());
+    arguments.insert({argName, argCount});
     argCount++;
     return 0;
 }
@@ -348,15 +415,7 @@ template <typename T>
 inline int KernelHandle::AddArgument(cl_mem_flags flags,
                                      const std::string &name,
                                      const size_t &size, const T &data) {
-    // dirty = true;
-    // SharedBuffer d_data = std::make_shared<cl::Buffer>(*context, flags,
-    // size); SetBufferData(&data, d_data, size);
 
-    // SetArgument<cl_mem, cl::Buffer>(argCount, d_data.get());
-    // Context::GetInstance()->AddBuffer(name, d_data, size);
-    // arguments.insert({name, argCount});
-    // argCount++;
-    // return 0;
     return AddArgument(flags, name, size, &data);
 }
 
@@ -364,11 +423,13 @@ template <typename T>
 inline int
 KernelHandle::AddArgument(cl_mem_flags flags, const std::string &name,
                           const size_t &size, const bool createBuffer) {
+    std::string argName = GetArgumentName(name);
     if (createBuffer) {
-        return AddArgument<T>(flags, name, size, nullptr);
+        return AddArgument<T>(flags, argName, size, nullptr);
     }
     SetArgument<T>(argCount, (T *)nullptr);
-    arguments.insert({name, argCount});
+
+    arguments.insert({argName, argCount});
     argCount++;
     return 0;
 }
@@ -389,13 +450,13 @@ inline int KernelHandle::SetArgument(const int argIndex, const T &data) {
 
 template <typename mem, typename T>
 inline int KernelHandle::SetArgument(const std::string &name, T *data) {
-    SetArgument(arguments[name], data);
+    SetArgument(arguments[GetArgumentName(name)], data);
     return 0;
 }
 
 template <typename T>
 inline int KernelHandle::SetArgument(const std::string &name, const T &data) {
-    SetArgument(arguments[name], data);
+    SetArgument(arguments[GetArgumentName(name)], data);
     return 0;
 }
 
@@ -414,26 +475,26 @@ inline int KernelHandle::SetBufferData(T *data, SharedBuffer buffer,
 
 template <typename T>
 inline int KernelHandle::SetBufferData(T *data, const std::string &name) {
-    if (arguments.find(name) == arguments.end()) {
+    std::string argName = GetArgumentName(name);
+    if (arguments.find(argName) == arguments.end()) {
         printf("Error: Buffer %s is not recognized!\n", name.c_str());
         return 1;
     }
-
-    dirty = true;
-    return SetBufferData(data, Context::GetInstance()->GetBuffer(name),
-                         Context::GetInstance()->GetBufferSize(name));
+    return SetBufferData(data, Context::GetInstance()->GetBuffer(argName),
+                         Context::GetInstance()->GetBufferSize(argName));
 }
 
 template <typename T>
 inline int KernelHandle::SetBufferData(T *data, const std::string &name,
                                        const size_t &size) {
-    if (arguments.find(name) == arguments.end()) {
+    std::string argName = GetArgumentName(name);
+    if (arguments.find(argName) == arguments.end()) {
         printf("Error: Buffer %s is not recognized!\n", name.c_str());
         return 1;
     }
 
     dirty = true;
-    return SetBufferData(data, Context::GetInstance()->GetBuffer(name),
+    return SetBufferData(data, Context::GetInstance()->GetBuffer(argName),
                          size);
 }
 
@@ -449,18 +510,18 @@ inline int KernelHandle::ReadBufferData(T *data, SharedBuffer buffer,
 }
 
 template <typename T>
-inline int KernelHandle::ReadBufferData(T *data,
-                                        const std::string &name) {
-    return ReadBufferData(data, Context::GetInstance()->GetBuffer(name),
-                          Context::GetInstance()->GetBufferSize(name));
+inline int KernelHandle::ReadBufferData(T *data, const std::string &name) {
+    std::string argName = GetArgumentName(name);
+    return ReadBufferData(data, Context::GetInstance()->GetBuffer(argName),
+                          Context::GetInstance()->GetBufferSize(argName));
 }
 
 template <typename T>
 inline int KernelHandle::ReadBufferData(T *data, const std::string &name,
                                         const size_t &size) {
     // return ReadBufferData(data, buffers[name].first, size);
-    return ReadBufferData(data, Context::GetInstance()->GetBuffer(name),
-                          size);
+    return ReadBufferData(
+        data, Context::GetInstance()->GetBuffer(GetArgumentName(name)), size);
 }
 
 } // namespace peasyocl

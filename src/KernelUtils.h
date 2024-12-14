@@ -60,7 +60,8 @@ struct ClFile {
      */
     inline static const std::vector<ClFile> GetKernelPaths() {
         std::vector<ClFile> result;
-        const char *env = std::getenv(OCL_KERNEL_PATHS_ENVIRONMENT);
+        const char *env;
+        env = std::getenv(OCL_KERNEL_PATHS_ENVIRONMENT);
 
         if (!env) {
             return result;
@@ -90,8 +91,11 @@ struct ClFile {
      * OCL_KERNEL_PATHS environment variable
      * @return const std::string
      */
-    static const ClFile GetClFileByName(const std::string &name) {
+    static const ClFile GetClFileByName(const std::string &name, const std::string &dir="") {
         std::vector<ClFile> paths = GetKernelPaths();
+        if (!dir.empty()) {
+            paths.push_back(ClFile{dir});
+        }
         if (paths.size() == 0) {
             std::cout << "Failed: Could not find kernel paths" << std::endl;
             return ClFile();

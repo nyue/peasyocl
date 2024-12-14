@@ -46,56 +46,9 @@ int Context::Init() {
     return 0;
 }
 
-// int Context::AddSource(const utils::ClFile &clfile) {
-//     std::string kernelSource = clfile.LoadClKernelSource();
-//     return AddSource(kernelSource);
-// }
-
-// int Context::AddSource(const std::string_view &kernelCode) {
-//     if (!initialized) {
-//         printf("warning: Trying to add source to not initialized context");
-//         return 1;
-//     }
-//     if (kernelCode.empty()) {
-//         printf("Warning: Attempting to add empty kernel code\n");
-//         return 1;
-//     }
-    // _kernelCodes.push_back(std::string(kernelCode));
-    // return 0;
-// }
-
-// int Context::Build(const std::vector<std::string> &extraIncludes) {
-//     if (!initialized || _kernelCodes.empty()) {
-//         printf("Warning: Attempting to build unitialized program\n");
-//         return 1;
-//     }
-
-//     cl_int err;
-//     cl::Program program(_context, _kernelCodes, &err);
-
-//     std::string flags = "-cl-std=CL1.2 ";
-//     for (utils::ClFile clFile : utils::ClFile::GetKernelPaths()) {
-//         flags.append(std::string("-I ").append(clFile.path));
-//     }
-//     for (std::string path : extraIncludes) {
-//         flags.append(std::string("-I ").append(path));
-//     }
-//     err = program.build(_device, flags.c_str(), nullptr);
-
-//     if (err != CL_SUCCESS) {
-//         std::string t;
-//         program.getBuildInfo(_device, CL_PROGRAM_BUILD_LOG, &t);
-
-//         printf("%s \n", t.c_str());
-//         printf("Error: Failed to build program executable! %i \n", err);
-//         return 1;
-//     }
-
-//     return 0;
-// }
-
-void Context::AddBuffer(const std::string &name, SharedBuffer buffer, const size_t &size) {
-    _buffers.insert({name, {std::move(buffer), size}});    
+void Context::AddBuffer(const std::string &name, SharedBuffer buffer,
+                        const size_t &size) {
+    _buffers.insert({name, {std::move(buffer), size}});
 }
 
 SharedBuffer Context::GetBuffer(const std::string &name) {
@@ -125,7 +78,8 @@ KernelHandle *Context::AddKernel(const std::string &code,
         handle.key = kernelName;
     }
 
-    if (auto foundKernel = _kernels.find(handle.key); foundKernel != _kernels.end()) {
+    if (auto foundKernel = _kernels.find(handle.key);
+        foundKernel != _kernels.end()) {
         if (foundKernel->second.built) {
             return &foundKernel->second;
         }
@@ -140,19 +94,24 @@ KernelHandle *Context::AddKernel(const std::string &code,
         return nullptr;
     }
 
-    std::string flags = "-cl-std=CL1.2 ";
+    std::string flags = "-cl-std=CL2.0 ";
     for (utils::ClFile clFile : utils::ClFile::GetKernelPaths()) {
-        flags.append(std::string("-I ").append(clFile.path));
+        if (!clFile.empty()) {
+            flags.append(std::string("-I ").append(clFile.path));
+        }
     }
     for (std::string path : includes) {
-        flags.append(std::string("-I ").append(path));
+        if (!path.empty()) {
+            flags.append(std::string("-I ").append(path));
+        }
     }
+
     err = handle.program.build(_device, flags.c_str(), nullptr);
 
     if (err != CL_SUCCESS) {
         handle.built = false;
-        printf("Error: Failed to build program %s\n",
-               kernelName.c_str());
+        printf("Error: Failed to build program %s: %i\n", kernelName.c_str(),
+               err);
         return nullptr;
     }
 
@@ -190,15 +149,17 @@ KernelHandle *Context::GetKernelHandle(const std::string &name) {
     return &_kernels[name];
 }
 
-int Context::Execute(const size_t &global, const std::string &kernelName) {
+int Context::Execute(const std::string &kernelName, const cl::NDRange &global,
+                     const cl::NDRange &local) {
     KernelHandle *kernel = GetKernelHandle(kernelName);
     if (!kernel) {
         return 1;
     }
-    return Execute(global, &_kernels[kernelName]);
+    return Execute(&_kernels[kernelName], global, local);
 }
 
-int Context::Execute(const size_t &global, KernelHandle *kernelHandle) {
+int Context::Execute(KernelHandle *kernelHandle, const cl::NDRange &global,
+                     const cl::NDRange &local) {
     if (!initialized) {
         return 1;
     }
@@ -206,24 +167,64 @@ int Context::Execute(const size_t &global, KernelHandle *kernelHandle) {
         return 1;
     }
 
-    size_t local;
     cl_int err;
-    err = kernelHandle->kernel.getWorkGroupInfo<size_t>(
-        _device, CL_KERNEL_WORK_GROUP_SIZE, &local);
-    if (err != CL_SUCCESS) {
-        printf("Error: Failed to retrieve kernel work group info! %d\n", err);
-        return 1;
-    }
+    size_t l;
 
     cl::Event ev;
     err = _queue.enqueueNDRangeKernel(kernelHandle->kernel, cl::NullRange,
-                                      cl::NDRange(global), cl::NullRange, NULL,
-                                      &ev);
+                                      global, local, NULL, &ev);
+
     ev.wait();
-    // _queue.finish();
-    // _queue.flush();
+
     if (err != CL_SUCCESS) {
-        printf("Error: Failed to execute kernel!\n");
+        printf("Error: Failed to execute kernel %s!\n",
+               kernelHandle->key.c_str());
+        return 1;
+    }
+
+    kernelHandle->dirty = false;
+    return 0;
+}
+
+int Context::ExecuteGraph(const std::string &kernelName,
+                          const std::vector<int> sizes,
+                          const std::string &wg_argument) {
+    KernelHandle *kernel = GetKernelHandle(kernelName);
+    if (!kernel) {
+        return 1;
+    }
+    return ExecuteGraph(&_kernels[kernelName], sizes, wg_argument);
+}
+
+int Context::ExecuteGraph(KernelHandle *kernelHandle,
+                          const std::vector<int> sizes,
+                          const std::string &wg_argument) {
+    if (!initialized) {
+        return 1;
+    }
+    if (!kernelHandle->built) {
+        return 1;
+    }
+
+    cl_int err;
+    size_t l;
+
+    cl::Event ev;
+    int offset = 0;
+    for (int i = 0; i < sizes.size(); i++) {
+        if (!wg_argument.empty()) {
+            kernelHandle->SetArgument(wg_argument, offset + sizes[i]);
+        }
+        err = _queue.enqueueNDRangeKernel(kernelHandle->kernel, offset,
+                                          sizes[i], cl::NullRange, NULL, &ev);
+        offset += sizes[i];
+    }
+
+    ev.wait();
+
+    if (err != CL_SUCCESS) {
+        printf("Error: Failed to execute kernel %s!\n",
+               kernelHandle->key.c_str());
         return 1;
     }
 
