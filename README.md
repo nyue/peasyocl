@@ -8,10 +8,17 @@ peasyocl is a very easy, plug-and-play library for opencl. It allows for very ba
 The opencl.hpp header is included.
 
 ## Build
-### Ubuntu
+
 The following packages was also required for a successful build
+
+### Ubuntu
 ```sh
- apt install ocl-icd-opencl-dev opencl-headers
+apt install ocl-icd-opencl-dev opencl-headers
+```
+
+### RH/Rocky/Alma
+```
+dnf install ocl-icd-devel.x86_64
 ```
 
 ## Install
