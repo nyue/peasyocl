@@ -21,6 +21,7 @@
 #include "KernelUtils.h"
 #include "opencl.hpp"
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
