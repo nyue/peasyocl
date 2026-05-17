@@ -12,6 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+if (WIN32)
+      if (DEFINED ENV{HFS})
+      	    set(OpenCL_INCLUDE_DIR "$ENV{HFS}/toolkit/include")
+	    set(OpenCL_LIBRARY "$ENV{HFS}/custom/houdini/dsolib/OpenCL.lib")
+	    include_directories("${OpenCL_INCLUDE_DIR}")
+      else()
+	message(ERROR "Must use OpenCL from Houdini")
+      endif()
+endif()
+
 find_package(OpenCL REQUIRED)
 
 set(OPENCL_CLHPP_HEADERS_DIR .)
