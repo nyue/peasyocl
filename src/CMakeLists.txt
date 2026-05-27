@@ -13,13 +13,21 @@
 # limitations under the License.
 
 if (WIN32)
-      if (DEFINED ENV{HFS})
-      	    set(OpenCL_INCLUDE_DIR "$ENV{HFS}/toolkit/include")
-	    set(OpenCL_LIBRARY "$ENV{HFS}/custom/houdini/dsolib/OpenCL.lib")
-	    include_directories("${OpenCL_INCLUDE_DIR}")
-      else()
-	message(ERROR "Must use OpenCL from Houdini")
-      endif()
+    # Resolve Houdini root from cmake variable or environment variable.
+    if (DEFINED HOUDINI_INSTALL_ROOT)
+        set(_hfs "${HOUDINI_INSTALL_ROOT}")
+    elseif (DEFINED ENV{HFS})
+        set(_hfs "$ENV{HFS}")
+    else()
+        message(FATAL_ERROR "Set HOUDINI_INSTALL_ROOT (cmake) or HFS (env) to the Houdini install directory")
+    endif()
+    set(OpenCL_INCLUDE_DIR "${_hfs}/toolkit/include")
+    set(OpenCL_LIBRARY "${_hfs}/custom/houdini/dsolib/OpenCL.lib")
+    include_directories("${OpenCL_INCLUDE_DIR}")
+
+    # MSVC does not auto-export symbols from shared libraries; this flag
+    # generates a .def file so the linker produces a peasyocl.lib import lib.
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
 find_package(OpenCL REQUIRED)
@@ -58,6 +66,8 @@ install(
     TARGETS ${OCLMODULE_NAME}
     EXPORT ${OCLMODULE_NAME}Targets
     LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+    ARCHIVE DESTINATION lib
     INCLUDES DESTINATION include/peasyocl
 )
 install(
