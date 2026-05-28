@@ -67,19 +67,29 @@ struct ClFile {
             return result;
         }
 
+        // Windows uses ';' as the path list separator; Unix uses ':'.
+#ifdef _WIN32
+        const char sep = ';';
+#else
+        const char sep = ':';
+#endif
+
         std::string stringEnv(env);
         size_t prev = 0;
-        size_t found = stringEnv.find(":");
+        size_t found = stringEnv.find(sep);
         if (found == std::string::npos) {
             result.push_back(ClFile{stringEnv});
             return result;
         }
 
         while (found != std::string::npos) {
-            std::string substr = stringEnv.substr(prev, found);
-            result.push_back(ClFile{substr});
-            prev = found;
-            found = stringEnv.find(":", found + 1);
+            result.push_back(ClFile{stringEnv.substr(prev, found - prev)});
+            prev = found + 1;
+            found = stringEnv.find(sep, prev);
+        }
+        // Append the trailing segment after the last separator.
+        if (prev < stringEnv.size()) {
+            result.push_back(ClFile{stringEnv.substr(prev)});
         }
         return result;
     }

@@ -24,10 +24,6 @@ if (WIN32)
     set(OpenCL_INCLUDE_DIR "${_hfs}/toolkit/include")
     set(OpenCL_LIBRARY "${_hfs}/custom/houdini/dsolib/OpenCL.lib")
     include_directories("${OpenCL_INCLUDE_DIR}")
-
-    # MSVC does not auto-export symbols from shared libraries; this flag
-    # generates a .def file so the linker produces a peasyocl.lib import lib.
-    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
 find_package(OpenCL REQUIRED)
@@ -37,11 +33,13 @@ set(OPENCL_CLHPP_HEADERS_DIR .)
 set(SOURCES Context.cpp)
 set(HEADERS Context.h KernelUtils.h opencl.hpp)
 
-add_library(${OCLMODULE_NAME}
-    SHARED
-        ${HEADERS}
-        ${SOURCES}
-)
+# On Windows build as a static library so hairProcHoudini.dll carries all
+# peasyocl code internally — no peasyocl.dll to locate at plugin-load time.
+if (WIN32)
+    add_library(${OCLMODULE_NAME} STATIC ${HEADERS} ${SOURCES})
+else()
+    add_library(${OCLMODULE_NAME} SHARED ${HEADERS} ${SOURCES})
+endif()
 
 target_link_libraries(${OCLMODULE_NAME}
     PUBLIC
@@ -66,7 +64,6 @@ install(
     TARGETS ${OCLMODULE_NAME}
     EXPORT ${OCLMODULE_NAME}Targets
     LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
     INCLUDES DESTINATION include/peasyocl
 )
