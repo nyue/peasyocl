@@ -112,6 +112,12 @@ KernelHandle *Context::AddKernel(const std::string &code,
         handle.built = false;
         printf("Error: Failed to build program %s: %i\n", kernelName.c_str(),
                err);
+        std::string buildLog =
+            handle.program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(_device);
+        if (!buildLog.empty()) {
+            printf("--- OpenCL build log for %s ---\n%s\n--- end build log ---\n",
+                   kernelName.c_str(), buildLog.c_str());
+        }
         return nullptr;
     }
 

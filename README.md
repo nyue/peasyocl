@@ -66,3 +66,9 @@ tgtHandle->ReadBufferData(result.data(), "result", globalSize);
 
 oclContext->Finish();
 ```
+
+## Troubleshooting
+
+When `Build()` / `AddKernel()` fails, the build error code is printed along with the OpenCL build log returned by `clGetProgramBuildInfo(CL_PROGRAM_BUILD_LOG)`. The log is delimited between `--- OpenCL build log for <kernel> ---` and `--- end build log ---` lines.
+
+An empty build log following a non-zero error code usually means the failure occurred before the compiler ran — for example, the OpenCL ICD could not load its IGC dependencies (`libigdfcl.so.2`, `libopencl-clang2.so.*`). Check `ldconfig -p` for those libraries and run `sudo ldconfig` if the runtime was installed to a path not already in the loader cache.
