@@ -40,7 +40,7 @@ struct ClFile {
         std::ifstream filestream(path);
 
         if (!filestream.is_open()) {
-            std::cout << "Error: Failed to load file: " << path << std::endl;
+            std::cout << "Error: Failed to load file: \"" << path << "\"" << std::endl;
         }
         if (filestream.peek() == std::ifstream::traits_type::eof()) {
             return "";
@@ -129,6 +129,10 @@ struct ClFile {
             if (file.good()) {
                 return ClFile{path};
             }
+        }
+        std::cout << "Error: Could not find kernel \"" << name << "\" in searched paths:" << std::endl;
+        for (auto &it : paths) {
+            std::cout << "  " << it.path << std::endl;
         }
         return ClFile();
     }
